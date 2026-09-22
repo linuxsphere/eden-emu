@@ -101,6 +101,9 @@ private:
     bool storage_supported;
     bool use_present_thread;
     std::size_t image_count{};
+#ifdef __ANDROID__
+    const void* last_render_surface{nullptr};
+#endif
 };
 
 } // namespace Vulkan

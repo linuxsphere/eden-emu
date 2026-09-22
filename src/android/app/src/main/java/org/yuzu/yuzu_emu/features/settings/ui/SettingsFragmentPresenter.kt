@@ -575,6 +575,7 @@ class SettingsFragmentPresenter(
             add(IntSetting.RENDERER_ASPECT_RATIO.key)
             add(IntSetting.VERTICAL_ALIGNMENT.key)
             add(BooleanSetting.PICTURE_IN_PICTURE.key)
+            add(BooleanSetting.USE_SECONDARY_DISPLAY.key)
         }
     }
 

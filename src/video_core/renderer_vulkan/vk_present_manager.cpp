@@ -129,6 +129,9 @@ PresentManager::PresentManager(const vk::Instance& instance_,
     , blit_supported{CanBlitToSwapchain(device.GetPhysical(), swapchain.GetImageViewFormat())}
     , storage_supported{CanStoreToFrame(device.GetPhysical(), swapchain.GetImageFormat())}
     , use_present_thread{Settings::values.async_presentation.GetValue()}
+#ifdef __ANDROID__
+    , last_render_surface{render_window.GetWindowInfo().render_surface}
+#endif
 {
     SetImageCount();
 
@@ -376,6 +379,19 @@ void PresentManager::SetImageCount() {
 
 void PresentManager::CopyToSwapchain(Frame* frame) {
     bool requires_recreation = false;
+
+#ifdef __ANDROID__
+    const void* current_render_surface = render_window.GetWindowInfo().render_surface;
+    if (current_render_surface != last_render_surface) {
+        last_render_surface = current_render_surface;
+        if (!current_render_surface) {
+            return;
+        }
+        requires_recreation = true;
+    } else if (!current_render_surface) {
+        return;
+    }
+#endif
 
     while (true) {
         try {

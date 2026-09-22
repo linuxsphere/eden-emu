@@ -80,6 +80,12 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
 
     var layout = OverlayLayout.Landscape
 
+    var isSecondaryDisplayMode = false
+        set(value) {
+            field = value
+            refreshControls()
+        }
+
     // External listener for EmulationFragment joypad overlay auto-hide
     var touchEventListener: ((MotionEvent) -> Unit)? = null
 
@@ -302,7 +308,7 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
             invalidate()
         }
 
-        if (!BooleanSetting.TOUCHSCREEN.getBoolean()) {
+        if (isSecondaryDisplayMode || !BooleanSetting.TOUCHSCREEN.getBoolean()) {
             return true
         }
 
@@ -805,7 +811,7 @@ class InputOverlay(context: Context, attrs: AttributeSet?) :
         overlayJoysticks.clear()
 
         // Add all the enabled overlay items back to the HashSet.
-        if (gamelessMode || BooleanSetting.SHOW_INPUT_OVERLAY.getBoolean()) {
+        if (gamelessMode || isSecondaryDisplayMode || BooleanSetting.SHOW_INPUT_OVERLAY.getBoolean()) {
             addOverlayControls(layout)
         }
         invalidate()

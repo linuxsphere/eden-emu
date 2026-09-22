@@ -156,7 +156,12 @@ ANativeWindow* EmulationSession::NativeWindow() const {
 }
 
 void EmulationSession::SetNativeWindow(ANativeWindow* native_window) {
-    m_native_window = native_window;
+    if (m_native_window != native_window) {
+        if (m_native_window) {
+            ANativeWindow_release(m_native_window);
+        }
+        m_native_window = native_window;
+    }
 }
 
 void EmulationSession::InitializeGpuDriver(const std::string& hook_lib_dir,
@@ -211,7 +216,7 @@ int EmulationSession::ShadersBuilding() {
 }
 
 void EmulationSession::SurfaceChanged() {
-    if (!IsRunning()) {
+    if (!IsRunning() || !m_window) {
         return;
     }
     m_window->OnSurfaceChanged(m_native_window);
@@ -756,10 +761,8 @@ void Java_org_yuzu_yuzu_1emu_NativeLibrary_surfaceChanged(JNIEnv* env, jobject i
 }
 
 void Java_org_yuzu_yuzu_1emu_NativeLibrary_surfaceDestroyed(JNIEnv* env, jobject instance) {
-    if (auto* native_window = EmulationSession::GetInstance().NativeWindow(); native_window) {
-        ANativeWindow_release(native_window);
-    }
     EmulationSession::GetInstance().SetNativeWindow(nullptr);
+    EmulationSession::GetInstance().SurfaceChanged();
 }
 
 void Java_org_yuzu_yuzu_1emu_NativeLibrary_setAppDirectory(JNIEnv* env, jobject instance,

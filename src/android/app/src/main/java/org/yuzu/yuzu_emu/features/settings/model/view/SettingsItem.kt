@@ -259,6 +259,13 @@ abstract class SettingsItem(
             )
             put(
                 SwitchSetting(
+                    BooleanSetting.USE_SECONDARY_DISPLAY,
+                    titleId = R.string.use_secondary_display,
+                    descriptionId = R.string.use_secondary_display_description
+                )
+            )
+            put(
+                SwitchSetting(
                     BooleanSetting.DEBUG_FLUSH_BY_LINE,
                     titleId = R.string.flush_by_line,
                     descriptionId = R.string.flush_by_line_description

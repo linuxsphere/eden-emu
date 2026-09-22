@@ -636,6 +636,8 @@
     <string name="vertical_alignment">Vertical alignment</string>
     <string name="picture_in_picture">Picture in Picture</string>
     <string name="picture_in_picture_description">Minimize window when placed in the background</string>
+    <string name="use_secondary_display">Secondary Display</string>
+    <string name="use_secondary_display_description">Cast gameplay to connected secondary monitor and display virtual gamepad on phone</string>
 
     <string name="warning_resolution">Resolution scaling to 2x or higher is known to cause issues, and may result in significant slowdowns of your device.</string>
 

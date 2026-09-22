@@ -41,6 +41,7 @@ enum class BooleanSetting(override val key: String) : AbstractBooleanSetting {
     RENDERER_FRAME_GEN_FLOW_SCALE_AUTO("frame_gen_flow_scale_auto"),
     GPU_UNSWIZZLE_ENABLED("gpu_unswizzle_enabled"),
     PICTURE_IN_PICTURE("picture_in_picture"),
+    USE_SECONDARY_DISPLAY("use_secondary_display"),
     USE_CUSTOM_RTC("custom_rtc_enabled"),
     BLACK_BACKGROUNDS("black_backgrounds"),
     INVERT_CONFIRM_BACK_CONTROLLER_BUTTONS("invert_confirm_back_controller_buttons"),

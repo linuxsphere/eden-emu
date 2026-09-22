@@ -36,6 +36,8 @@ namespace AndroidSettings {
         // Android
         Settings::Setting<bool> picture_in_picture{linkage, false, "picture_in_picture",
                                                    Settings::Category::Android};
+        Settings::Setting<bool> use_secondary_display{linkage, true, "use_secondary_display",
+                                                      Settings::Category::Android};
         Settings::Setting<s32> screen_layout{linkage,
                                              5,
                                              "screen_layout",

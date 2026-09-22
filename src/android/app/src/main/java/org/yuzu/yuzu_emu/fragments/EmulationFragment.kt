@@ -16,6 +16,8 @@ import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.hardware.display.DisplayManager
 import android.net.Uri
 import android.os.BatteryManager
 import android.os.BatteryManager.*
@@ -25,6 +27,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Rational
+import android.view.Display
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.MotionEvent
@@ -103,6 +106,7 @@ import org.yuzu.yuzu_emu.utils.CustomSettingsHandler
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.ByteBuffer
+import org.yuzu.yuzu_emu.presentation.SecondaryDisplayPresentation
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 import kotlin.or
@@ -156,6 +160,131 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     var shouldUseCustom = false
     private var isQuickSettingsMenuOpen = false
     private val quickSettings = QuickSettings(this)
+
+    private var secondaryPresentation: SecondaryDisplayPresentation? = null
+    private var isSecondaryDisplayActive = false
+    private var displayManager: DisplayManager? = null
+
+    private val displayListener = object : DisplayManager.DisplayListener {
+        override fun onDisplayAdded(displayId: Int) {
+            checkSecondaryDisplay()
+        }
+
+        override fun onDisplayRemoved(displayId: Int) {
+            if (secondaryPresentation?.display?.displayId == displayId) {
+                dismissSecondaryDisplay()
+            }
+        }
+
+        override fun onDisplayChanged(displayId: Int) {}
+    }
+
+    private val secondarySurfaceCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {}
+
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            Log.debug("[EmulationFragment] Secondary surface changed. Resolution: " + width + "x" + height)
+            if (!this@EmulationFragment::emulationState.isInitialized) {
+                return
+            }
+            if (!emulationStarted) {
+                emulationStarted = true
+                if (isCustomSettingsIntent || intentGame != null) {
+                    if (!driverViewModel.isInteractionAllowed.value) {
+                        lifecycleScope.launch {
+                            driverViewModel.isInteractionAllowed.collect { allowed ->
+                                if (allowed && holder.surface.isValid) {
+                                    emulationState.newSurface(holder.surface)
+                                }
+                            }
+                        }
+                        return
+                    }
+                }
+                emulationState.newSurface(holder.surface)
+            } else {
+                emulationState.updateSurfaceReference(holder.surface)
+            }
+            updatePausedFrameVisibility()
+        }
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            Log.debug("[EmulationFragment] Secondary surface destroyed.")
+            if (isSecondaryDisplayActive) {
+                NativeLibrary.surfaceDestroyed()
+                dismissSecondaryDisplay()
+            }
+        }
+    }
+
+    private fun getPresentationDisplay(): Display? {
+        val dm = displayManager ?: return null
+        val presentationDisplays = dm.getDisplays(DisplayManager.DISPLAY_CATEGORY_PRESENTATION)
+        if (presentationDisplays.isNotEmpty()) {
+            return presentationDisplays[0]
+        }
+        return dm.displays.firstOrNull { it.displayId != Display.DEFAULT_DISPLAY }
+    }
+
+    private fun checkSecondaryDisplay() {
+        if (!isAdded || _binding == null) return
+        if (!BooleanSetting.USE_SECONDARY_DISPLAY.getBoolean()) return
+
+        val display = getPresentationDisplay()
+        if (display != null && secondaryPresentation == null) {
+            setupSecondaryDisplay(display)
+        }
+    }
+
+    private fun setupSecondaryDisplay(display: Display) {
+        val context = context ?: return
+        Log.info("[EmulationFragment] Setting up secondary display on: ${display.name}")
+        isSecondaryDisplayActive = true
+
+        val b = _binding ?: return
+        b.surfaceEmulation.visibility = View.INVISIBLE
+        b.emulationContainer.setBackgroundColor(Color.BLACK)
+
+        b.surfaceInputOverlay.isSecondaryDisplayMode = true
+        b.surfaceInputOverlay.setVisible(true)
+        b.surfaceInputOverlay.bringToFront()
+
+        val presentation = SecondaryDisplayPresentation(context, display, secondarySurfaceCallback)
+        secondaryPresentation = presentation
+        presentation.setOnDismissListener {
+            if (isSecondaryDisplayActive) {
+                dismissSecondaryDisplay()
+            }
+        }
+        try {
+            presentation.show()
+        } catch (e: Exception) {
+            Log.error("[EmulationFragment] Failed to show secondary presentation: ${e.message}")
+            dismissSecondaryDisplay()
+        }
+    }
+
+    private fun dismissSecondaryDisplay() {
+        if (!isSecondaryDisplayActive && secondaryPresentation == null) return
+        Log.info("[EmulationFragment] Dismissing secondary display presentation.")
+        isSecondaryDisplayActive = false
+
+        val presentation = secondaryPresentation
+        secondaryPresentation = null
+        try {
+            presentation?.dismiss()
+        } catch (_: Exception) {}
+
+        val b = _binding ?: return
+        b.surfaceInputOverlay.isSecondaryDisplayMode = false
+        b.emulationContainer.background = null
+        b.surfaceEmulation.visibility = View.VISIBLE
+
+        val shouldShowOverlay = BooleanSetting.SHOW_INPUT_OVERLAY.getBoolean() &&
+            !hasPhysicalControllerConnected
+        b.surfaceInputOverlay.setVisible(shouldShowOverlay)
+        b.surfaceInputOverlay.refreshControls()
+    }
 
     private val loadAmiiboLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -684,6 +813,10 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         onPhysicalControllerStateChanged(InputHandler.androidControllers.isNotEmpty())
 
         binding.surfaceEmulation.holder.addCallback(this)
+
+        displayManager = requireContext().getSystemService(Context.DISPLAY_SERVICE) as DisplayManager
+        displayManager?.registerDisplayListener(displayListener, Handler(Looper.getMainLooper()))
+        checkSecondaryDisplay()
         binding.doneControlConfig.setOnClickListener { stopConfiguringControls() }
 
         binding.drawerLayout.addDrawerListener(object : DrawerListener {
@@ -1065,7 +1198,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
                 b.surfaceInputOverlay.setVisible(visible = false, gone = false)
             }
         } else {
-            val shouldShowOverlay = if (args.overlayGamelessEditMode) {
+            val shouldShowOverlay = if (args.overlayGamelessEditMode || isSecondaryDisplayActive) {
                 true
             } else {
                 showInputOverlay && emulationViewModel.emulationStarted.value &&
@@ -1470,8 +1603,22 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         super.onPause()
     }
 
+    override fun onStart() {
+        super.onStart()
+        checkSecondaryDisplay()
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (secondaryPresentation != null) {
+            dismissSecondaryDisplay()
+        }
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
+        displayManager?.unregisterDisplayListener(displayListener)
+        dismissSecondaryDisplay()
         amiiboLoadJob?.cancel()
         amiiboLoadJob = null
         perfStatsRunnable?.let { perfStatsUpdateHandler.removeCallbacks(it) }
@@ -1496,6 +1643,12 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         val b = _binding ?: return
         updateStatsPosition(IntSetting.PERF_OVERLAY_POSITION.getInt())
         updateSocPosition(IntSetting.SOC_OVERLAY_POSITION.getInt())
+
+        if (BooleanSetting.USE_SECONDARY_DISPLAY.getBoolean()) {
+            checkSecondaryDisplay()
+        } else if (isSecondaryDisplayActive) {
+            dismissSecondaryDisplay()
+        }
 
         if (this::emulationState.isInitialized) {
             b.inGameMenu.post {
@@ -1867,6 +2020,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
                 b.surfaceEmulation.layoutParams = params
             }
         }
+        secondaryPresentation?.updateAspectRatio()
         if (this::emulationState.isInitialized) {
             emulationState.updateSurface()
         }
@@ -1915,6 +2069,10 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     }
 
     override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+        if (isSecondaryDisplayActive && _binding != null && holder === binding.surfaceEmulation.holder) {
+            Log.debug("[EmulationFragment] Primary surface changed while secondary display active (ignored).")
+            return
+        }
         Log.debug("[EmulationFragment] Surface changed. Resolution: " + width + "x" + height)
         if (!emulationStarted) {
             emulationStarted = true
@@ -1945,6 +2103,10 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder) {
+        if (isSecondaryDisplayActive && _binding != null && holder === binding.surfaceEmulation.holder) {
+            Log.debug("[EmulationFragment] Primary surface destroyed while secondary display active (ignored).")
+            return
+        }
         if (this::emulationState.isInitialized && !hasNewerEmulationFragment()) {
             emulationState.clearSurface()
         }
@@ -2503,7 +2665,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     fun handleScreenTap(isLongTap: Boolean) {
         if (!isAdded || _binding == null) return
-        if (binding.surfaceInputOverlay.isGamelessMode()) return
+        if (binding.surfaceInputOverlay.isGamelessMode() || isSecondaryDisplayActive) return
         if (!BooleanSetting.ENABLE_INPUT_OVERLAY_AUTO_HIDE.getBoolean()) return
         // failsafe
         val autoHideSeconds = IntSetting.INPUT_OVERLAY_AUTO_HIDE.getInt()
@@ -2520,7 +2682,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
 
     private fun initializeOverlayAutoHide() {
         if (!isAdded || _binding == null) return
-        if (binding.surfaceInputOverlay.isGamelessMode()) return
+        if (binding.surfaceInputOverlay.isGamelessMode() || isSecondaryDisplayActive) return
 
         val autoHideSeconds = IntSetting.INPUT_OVERLAY_AUTO_HIDE.getInt()
         val autoHideEnabled = BooleanSetting.ENABLE_INPUT_OVERLAY_AUTO_HIDE.getBoolean()
@@ -2573,6 +2735,7 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
     }
 
     fun onControllerInputDetected() {
+        if (isSecondaryDisplayActive) return
         if (!BooleanSetting.HIDE_OVERLAY_ON_CONTROLLER_INPUT.getBoolean()) return
         if (!BooleanSetting.SHOW_INPUT_OVERLAY.getBoolean()) return
         if (controllerInputReceived) return
@@ -2593,6 +2756,10 @@ class EmulationFragment : Fragment(), SurfaceHolder.Callback {
         controllerInputReceived = false
         if (!isAdded || _binding == null) return
         if (binding.surfaceInputOverlay.isGamelessMode()) return
+        if (isSecondaryDisplayActive) {
+            binding.surfaceInputOverlay.setVisible(true)
+            return
+        }
 
         if (hasConnectedControllers) {
             if (BooleanSetting.SHOW_INPUT_OVERLAY.getBoolean() &&
